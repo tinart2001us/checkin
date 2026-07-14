@@ -366,13 +366,11 @@ const CONFIG = {
   RADIUS_METERS: 300                                // รัศมีที่ยอมรับ (เมตร)
 };
 
-
 /* ===================================================================== */
 
 const RING_CIRCUMFERENCE = 603; // 2 * PI * 96, precomputed
 let currentPosition = null;
 let profile = null;
-let todayLog = [];
 
 function updateClock(){
   const now = new Date();
@@ -447,17 +445,34 @@ function locateAndTrack(){
   );
 }
 
-function addLogEntry(type, statusOk, timeStr){
+function renderTodayLog(rows){
   const list = document.getElementById('log-list');
-  if(todayLog.length === 0) list.innerHTML = '';
-  const row = document.createElement('div');
-  row.className = 'log-item';
-  row.innerHTML = `
-    <span>${type} <span class="lt">· ${timeStr}</span></span>
-    <span class="badge ${statusOk ? 'ok' : 'out'}">${statusOk ? 'ผ่าน' : 'นอกพื้นที่'}</span>
-  `;
-  list.prepend(row);
-  todayLog.push(type);
+  if(!rows || rows.length === 0){
+    list.innerHTML = '<div class="log-item"><span class="lt">ยังไม่มีรายการ</span></div>';
+    return;
+  }
+  list.innerHTML = rows.map(r => {
+    const hasIssue = !!r.note || r.geoStatus !== 'ผ่าน';
+    const badgeText = r.note ? 'ผิดปกติ' : (r.geoStatus === 'ผ่าน' ? 'ผ่าน' : 'นอกพื้นที่');
+    return `
+      <div class="log-item">
+        <span>${r.type} <span class="lt">· ${r.time}</span></span>
+        <span class="badge ${hasIssue ? 'out' : 'ok'}">${badgeText}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+async function loadTodayLog(){
+  if(!profile) return;
+  try{
+    const url = CONFIG.APPS_SCRIPT_URL + '?action=todaylog&userId=' + encodeURIComponent(profile.userId) + '&_=' + Date.now();
+    const res = await fetch(url, { cache: 'no-store' });
+    const data = await res.json();
+    renderTodayLog(data.rows);
+  } catch(e){
+    // เงียบไว้ ไม่ทับ log ที่มีอยู่ถ้าโหลดไม่สำเร็จ
+  }
 }
 
 async function submitCheck(type){
@@ -499,7 +514,7 @@ async function submitCheck(type){
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('th-TH', { hour:'2-digit', minute:'2-digit' });
-    addLogEntry(type, inRange, timeStr);
+    loadTodayLog();
 
     if(result.note){
       // มีความผิดปกติด้านลำดับ เช่น ออกงานโดยไม่มีเข้างาน, กดซ้ำ ฯลฯ
@@ -567,6 +582,7 @@ async function initLiff(){
     document.getElementById('disp-id').textContent = 'ID: ' + profile.userId.slice(0, 10) + '…';
     locateAndTrack();
     loadMonthlySummary();
+    loadTodayLog();
   } catch(e){
     setStatus('เริ่มต้น LIFF ไม่สำเร็จ: ' + e.message, 'err');
     // สำหรับทดสอบนอก LINE: ใช้โปรไฟล์จำลอง
@@ -575,6 +591,7 @@ async function initLiff(){
     document.getElementById('disp-id').textContent = 'ID: (โหมดทดสอบ)';
     locateAndTrack();
     loadMonthlySummary();
+    loadTodayLog();
   }
 }
 
