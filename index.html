@@ -205,6 +205,52 @@
   .log-item .badge.ok{ background:var(--accent-dim); color:var(--accent); }
   .log-item .badge.out{ background:var(--warn-dim); color:var(--warn); }
 
+  .summary-card{
+    width:100%;
+    background:var(--accent-dim);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:16px 16px 14px;
+    margin-bottom:18px;
+  }
+  .summary-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:12px;
+  }
+  .summary-title{ font-size:13px; font-weight:600; }
+  .summary-month{ font-weight:400; color:var(--muted); font-size:11.5px; margin-left:2px; }
+  .summary-refresh{
+    border:none; background:none;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px; color:var(--accent);
+    cursor:pointer; padding:4px 8px;
+    border-radius:8px;
+  }
+  .summary-refresh:disabled{ opacity:.5; cursor:not-allowed; }
+  .summary-grid{
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    gap:8px;
+  }
+  .summary-stat{
+    background:var(--panel);
+    border-radius:10px;
+    padding:10px 4px;
+    text-align:center;
+  }
+  .summary-stat.has-issue{ background:var(--warn-dim); }
+  .summary-stat.has-issue .summary-num{ color:var(--warn); }
+  .summary-num{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:17px; font-weight:600;
+  }
+  .summary-label{
+    font-size:10px; color:var(--muted);
+    margin-top:2px;
+  }
+
   .spinner{
     width:16px; height:16px;
     border:2px solid rgba(255,255,255,.4);
@@ -274,6 +320,31 @@
 
     <div id="status-msg">กำลังขอสิทธิ์เข้าถึงตำแหน่ง...</div>
 
+    <div class="summary-card" id="summary-card">
+      <div class="summary-head">
+        <span class="summary-title">สรุปเดือนนี้<span class="summary-month" id="summary-month"></span></span>
+        <button class="summary-refresh" id="summary-refresh" onclick="loadMonthlySummary()">รีเฟรช</button>
+      </div>
+      <div class="summary-grid">
+        <div class="summary-stat">
+          <div class="summary-num" id="sum-days">–</div>
+          <div class="summary-label">วันที่มา</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-num" id="sum-hours">–</div>
+          <div class="summary-label">ชม.รวม</div>
+        </div>
+        <div class="summary-stat">
+          <div class="summary-num" id="sum-avg">–</div>
+          <div class="summary-label">ชม./วัน</div>
+        </div>
+        <div class="summary-stat" id="sum-anomaly-wrap">
+          <div class="summary-num" id="sum-anomaly">–</div>
+          <div class="summary-label">ผิดปกติ</div>
+        </div>
+      </div>
+    </div>
+
     <div class="log">
       <div class="log-title">ประวัติวันนี้ / TODAY'S LOG</div>
       <div id="log-list">
@@ -294,6 +365,7 @@ const CONFIG = {
   OFFICE_LNG: 99.555469,                             // พิกัด longitude ของบริษัท
   RADIUS_METERS: 300                                // รัศมีที่ยอมรับ (เมตร)
 };
+
 /* ===================================================================== */
 
 const RING_CIRCUMFERENCE = 603; // 2 * PI * 96, precomputed
@@ -435,6 +507,7 @@ async function submitCheck(type){
       setStatus(`บันทึก "${type}" แล้ว แต่อยู่นอกพื้นที่ที่กำหนด — แจ้ง HR แล้ว`, 'err');
     } else if(result.workHours){
       setStatus(`บันทึก "${type}" สำเร็จ เวลา ${timeStr} · ทำงานรวม ${result.workHours} ชม.`, 'ok');
+      loadMonthlySummary();
     } else {
       setStatus(`บันทึก "${type}" สำเร็จ เวลา ${timeStr}`, 'ok');
     }
@@ -443,6 +516,39 @@ async function submitCheck(type){
   } finally {
     activeBtn.innerHTML = originalHTML;
     btnIn.disabled = false; btnOut.disabled = false;
+  }
+}
+
+function formatMonthLabel(monthStr){
+  if(!monthStr) return '';
+  const [y, m] = monthStr.split('-');
+  const d = new Date(parseInt(y), parseInt(m) - 1, 1);
+  return ' · ' + d.toLocaleDateString('th-TH', { month:'long', year:'numeric' });
+}
+
+async function loadMonthlySummary(){
+  if(!profile) return;
+  const btn = document.getElementById('summary-refresh');
+  const originalText = btn.textContent;
+  btn.textContent = '...';
+  btn.disabled = true;
+
+  try{
+    const url = CONFIG.APPS_SCRIPT_URL + '?action=summary&userId=' + encodeURIComponent(profile.userId);
+    const res = await fetch(url);
+    const data = await res.json();
+
+    document.getElementById('summary-month').textContent = formatMonthLabel(data.month);
+    document.getElementById('sum-days').textContent = data.days || 0;
+    document.getElementById('sum-hours').textContent = data.totalHours || 0;
+    document.getElementById('sum-avg').textContent = data.avgHours || 0;
+    document.getElementById('sum-anomaly').textContent = data.anomalies || 0;
+    document.getElementById('sum-anomaly-wrap').classList.toggle('has-issue', (data.anomalies || 0) > 0);
+  } catch(e){
+    document.getElementById('summary-month').textContent = ' · โหลดไม่สำเร็จ';
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
   }
 }
 
@@ -458,6 +564,7 @@ async function initLiff(){
     document.getElementById('disp-name').textContent = profile.displayName;
     document.getElementById('disp-id').textContent = 'ID: ' + profile.userId.slice(0, 10) + '…';
     locateAndTrack();
+    loadMonthlySummary();
   } catch(e){
     setStatus('เริ่มต้น LIFF ไม่สำเร็จ: ' + e.message, 'err');
     // สำหรับทดสอบนอก LINE: ใช้โปรไฟล์จำลอง
@@ -465,6 +572,7 @@ async function initLiff(){
     document.getElementById('disp-name').textContent = profile.displayName;
     document.getElementById('disp-id').textContent = 'ID: (โหมดทดสอบ)';
     locateAndTrack();
+    loadMonthlySummary();
   }
 }
 
